@@ -1,0 +1,1615 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Web AR 3D Sinh học 10: Cấu trúc & Đặc tính của Nước (AR Hands V3.0 PRO)</title>
+
+  <!-- Tailwind CSS CDN -->
+  <script src="https://cdn.tailwindcss.com"></script>
+  <!-- FontAwesome 6 -->
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+  <!-- Three.js r128 -->
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+  <!-- OrbitControls -->
+  <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/controls/OrbitControls.js"></script>
+  <!-- MediaPipe Hands & Camera Utils -->
+  <script src="https://cdn.jsdelivr.net/npm/@mediapipe/camera_utils/camera_utils.js" crossorigin="anonymous"></script>
+  <script src="https://cdn.jsdelivr.net/npm/@mediapipe/hands/hands.js" crossorigin="anonymous"></script>
+
+  <style>
+    @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&family=JetBrains+Mono:wght@400;500;700&display=swap');
+
+    * {
+      box-sizing: border-box;
+      user-select: none;
+    }
+    body {
+      font-family: 'Inter', sans-serif;
+      overflow: hidden;
+      background-color: #030712;
+      color: #f8fafc;
+    }
+    .font-mono-code {
+      font-family: 'JetBrains Mono', monospace;
+    }
+
+    /* Glassmorphism Dark Sci-Fi HUD */
+    .sci-panel {
+      background: rgba(10, 15, 29, 0.82);
+      backdrop-filter: blur(18px);
+      -webkit-backdrop-filter: blur(18px);
+      border: 1px solid rgba(0, 243, 255, 0.25);
+      box-shadow: 0 12px 40px -8px rgba(0, 0, 0, 0.8), inset 0 0 15px rgba(0, 243, 255, 0.05);
+    }
+    .sci-btn {
+      background: rgba(15, 23, 42, 0.8);
+      border: 1px solid rgba(255, 255, 255, 0.12);
+      transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+    }
+    .sci-btn:hover {
+      background: rgba(30, 41, 59, 0.95);
+      border-color: rgba(0, 243, 255, 0.65);
+      box-shadow: 0 0 15px rgba(0, 243, 255, 0.35);
+      transform: translateY(-1px);
+    }
+    .sci-btn.active {
+      background: linear-gradient(135deg, rgba(6, 182, 212, 0.9) 0%, rgba(3, 105, 161, 0.9) 100%);
+      border-color: #00f3ff;
+      box-shadow: 0 0 20px rgba(0, 243, 255, 0.55);
+    }
+
+    /* Corner HUD brackets */
+    .ar-corner-bracket {
+      position: absolute;
+      width: 22px;
+      height: 22px;
+      pointer-events: none;
+      border-color: rgba(0, 243, 255, 0.85);
+    }
+    .ar-corner-tl { top: 12px; left: 12px; border-top: 2px solid; border-left: 2px solid; }
+    .ar-corner-tr { top: 12px; right: 12px; border-top: 2px solid; border-right: 2px solid; }
+    .ar-corner-bl { bottom: 12px; left: 12px; border-bottom: 2px solid; border-left: 2px solid; }
+    .ar-corner-br { bottom: 12px; right: 12px; border-bottom: 2px solid; border-right: 2px solid; }
+
+    /* Custom range slider */
+    input[type=range] {
+      -webkit-appearance: none;
+      height: 6px;
+      border-radius: 9999px;
+      background: #1e293b;
+      outline: none;
+    }
+    input[type=range]::-webkit-slider-thumb {
+      -webkit-appearance: none;
+      width: 16px;
+      height: 16px;
+      border-radius: 50%;
+      background: #00f3ff;
+      box-shadow: 0 0 10px #00f3ff;
+      cursor: pointer;
+      border: 2px solid #ffffff;
+      transition: transform 0.15s ease;
+    }
+    input[type=range]::-webkit-slider-thumb:hover {
+      transform: scale(1.25);
+    }
+
+    /* Scrollbar */
+    ::-webkit-scrollbar { width: 4px; }
+    ::-webkit-scrollbar-track { background: rgba(15, 23, 42, 0.5); }
+    ::-webkit-scrollbar-thumb { background: rgba(0, 243, 255, 0.45); border-radius: 9999px; }
+  </style>
+</head>
+<body class="w-screen h-screen relative overflow-hidden bg-slate-950">
+
+  <!-- Fullscreen AR Passthrough Camera Video (Mirror Mode) -->
+  <video id="webcam-fullscreen" playsinline autoplay muted class="absolute inset-0 w-full h-full object-cover transform -scale-x-100 z-0 opacity-0 transition-opacity duration-500"></video>
+  
+  <!-- Overlay Canvas for Hand Hologram Lines in Fullscreen Mode -->
+  <canvas id="ar-fullscreen-canvas" class="absolute inset-0 w-full h-full z-10 pointer-events-none transform -scale-x-100"></canvas>
+
+  <!-- 3D WebGL Canvas Layer -->
+  <div id="canvas-container" class="absolute inset-0 w-full h-full z-10 cursor-grab active:cursor-grabbing"></div>
+
+  <!-- Sci-Fi HUD Viewfinder Corner Frames -->
+  <div class="ar-corner-bracket ar-corner-tl z-20"></div>
+  <div class="ar-corner-bracket ar-corner-tr z-20"></div>
+  <div class="ar-corner-bracket ar-corner-bl z-20"></div>
+  <div class="ar-corner-bracket ar-corner-br z-20"></div>
+
+  <!-- Hidden camera element for background MediaPipe processing -->
+  <video id="webcam-raw" class="hidden" playsinline muted autoplay></video>
+
+  <header id="top-hud-bar" class="absolute top-0 left-0 right-0 z-30 flex items-center justify-between px-3 sm:px-6 py-2.5 sci-panel border-t-0 border-x-0 transition-all duration-300">
+    <div class="flex items-center space-x-2.5">
+      <div class="w-8 h-8 rounded-xl bg-gradient-to-tr from-cyan-500 via-blue-600 to-indigo-600 flex items-center justify-center text-white shadow-lg shadow-cyan-500/30">
+        <i class="fa-solid fa-atom text-sm"></i>
+      </div>
+      <div>
+        <h1 class="font-bold text-xs sm:text-sm tracking-wide text-white flex items-center gap-1.5">
+          Web AR Sinh Học 10
+          <span class="text-[10px] px-1.5 py-0.5 rounded bg-cyan-950 text-cyan-400 border border-cyan-800/60 font-mono-code font-bold">V3.0 PRO</span>
+        </h1>
+        <p class="text-[10px] text-slate-400 hidden sm:block">Mô hình phân tử Nước 3D & Liên kết Hydrogen chuẩn ảnh mẫu</p>
+      </div>
+    </div>
+
+    <!-- Center HUD Status Widget -->
+    <div class="flex items-center gap-2 sm:gap-3 px-3 py-1.5 rounded-xl bg-slate-900/90 border border-cyan-500/30 font-mono-code text-[11px] shadow-lg">
+      <div class="flex items-center gap-1.5">
+        <span class="w-2 h-2 rounded-full bg-slate-500 transition-colors" id="hud-status-dot"></span>
+        <span id="hud-tracking-state" class="text-slate-300">AR: Sẵn sàng</span>
+      </div>
+      <span class="text-slate-600">|</span>
+      <div class="flex items-center gap-1 text-cyan-400">
+        <span id="hud-fps-counter">60</span><span class="text-[9px] text-slate-400">FPS</span>
+      </div>
+      <span class="text-slate-600 hidden md:inline">|</span>
+      <div class="hidden md:flex items-center gap-1 text-amber-300">
+        <span class="text-slate-400 text-[10px]">Tỉ lệ:</span>
+        <span id="hud-scale-val" class="font-bold">100%</span>
+      </div>
+      <span class="text-slate-600 hidden lg:inline">|</span>
+      <div class="hidden lg:flex items-center gap-1">
+        <span class="text-slate-400 text-[10px]">Tự quay:</span>
+        <span id="hud-autorotate-state" class="text-rose-400 font-bold">TẮT</span>
+      </div>
+    </div>
+
+    <!-- Right Controls -->
+    <div class="flex items-center space-x-1.5 sm:space-x-2">
+      <!-- Button: AR Mode Switch -->
+      <button id="ar-mode-toggle" onclick="toggleArBackground()" title="Đổi chế độ nền camera xuyên thấu" class="sci-btn px-2.5 py-1.5 rounded-lg text-xs text-cyan-300 flex items-center gap-1.5 font-medium">
+        <i class="fa-solid fa-camera" id="ar-bg-icon"></i>
+        <span class="hidden md:inline" id="ar-bg-label">Nền AR: Tắt</span>
+      </button>
+
+      <!-- Button: AR Camera Start/Stop -->
+      <button id="ar-toggle-btn" onclick="toggleWebcamAR()" class="px-3 py-1.5 rounded-lg bg-cyan-600 hover:bg-cyan-500 text-white text-xs font-semibold shadow-lg shadow-cyan-600/30 flex items-center gap-1.5 transition">
+        <i class="fa-solid fa-video"></i>
+        <span id="ar-btn-label">Bật Camera AR</span>
+      </button>
+
+      <!-- Lecture Mode Button -->
+      <button onclick="toggleLectureMode()" id="lecture-toggle-btn" title="Chế độ thuyết trình toàn màn hình" class="sci-btn p-2 rounded-lg text-xs text-slate-300 hover:text-white">
+        <i class="fa-solid fa-expand"></i>
+      </button>
+
+      <!-- Reset View -->
+      <button onclick="resetCameraView()" title="Đặt lại góc nhìn 100%" class="sci-btn p-2 rounded-lg text-xs text-slate-300 hover:text-white">
+        <i class="fa-solid fa-arrows-rotate"></i>
+      </button>
+    </div>
+  </header>
+
+  <!-- 3 Pedagogical Modes Selection Bar -->
+  <div id="mode-bar" class="absolute top-16 left-1/2 -translate-x-1/2 z-30 flex space-x-1 p-1 rounded-xl sci-panel">
+    <button onclick="setSimulationMode(1)" id="mode-btn-1" class="sci-btn px-3 py-1.5 rounded-lg text-xs font-medium flex items-center gap-1.5">
+      <i class="fa-solid fa-atom text-cyan-400"></i>
+      <span>1. Cấu trúc H₂O</span>
+    </button>
+    <button onclick="setSimulationMode(2)" id="mode-btn-2" class="sci-btn active px-3 py-1.5 rounded-lg text-xs font-medium flex items-center gap-1.5">
+      <i class="fa-solid fa-network-wired text-cyan-400"></i>
+      <span>2. LK Hydrogen (Ảnh mẫu)</span>
+    </button>
+    <button onclick="setSimulationMode(3)" id="mode-btn-3" class="sci-btn px-3 py-1.5 rounded-lg text-xs font-medium flex items-center gap-1.5">
+      <i class="fa-solid fa-flask-vial text-cyan-400"></i>
+      <span>3. Dung môi NaCl</span>
+    </button>
+  </div>
+
+  <aside id="left-panel" class="absolute left-4 top-28 bottom-6 z-30 w-80 max-w-[calc(100vw-2rem)] flex flex-col justify-between pointer-events-none transition-all duration-300">
+    <div class="sci-panel rounded-2xl p-3.5 pointer-events-auto flex flex-col gap-3 max-h-[75vh] overflow-y-auto pr-2 shadow-2xl">
+      
+      <!-- Mode Header -->
+      <div class="flex items-center justify-between border-b border-cyan-500/20 pb-2">
+        <span id="panel-mode-title" class="font-bold text-xs uppercase tracking-wider text-cyan-400">Chế độ 2: Mạng LK Hydrogen</span>
+        <span class="text-[9px] text-cyan-300 font-mono-code bg-cyan-950 px-2 py-0.5 rounded border border-cyan-800">V3.0 ACCURATE</span>
+      </div>
+
+      <!-- Sci-Fi AR Gesture Guide Card -->
+      <div class="p-2.5 rounded-xl bg-cyan-950/40 border border-cyan-500/30 text-[11px] space-y-1.5">
+        <div class="text-cyan-300 font-semibold flex items-center gap-1.5 text-xs">
+          <i class="fa-solid fa-hand-pointer text-amber-400"></i> Thao tác tương tác không chạm:
+        </div>
+        <div class="space-y-1 text-slate-300 text-[10.5px]">
+          <div class="flex items-center gap-2">
+            <span class="w-5 text-center text-cyan-400 font-bold">🖐️</span>
+            <span><strong>1 Bàn tay / Kéo chuột:</strong> Xoay vật thể đa chiều (Pitch / Yaw).</span>
+          </div>
+          <div class="flex items-center gap-2">
+            <span class="w-5 text-center text-emerald-400 font-bold">👐</span>
+            <span><strong>2 Bàn tay / Lăn chuột:</strong> Thu phóng trong giới hạn 55% - 200%.</span>
+          </div>
+          <div class="flex items-center gap-2">
+            <span class="w-5 text-center text-rose-400 font-bold">🛑</span>
+            <span><strong>Tắt tự quay:</strong> Mô hình đứng yên cố định ở mọi mức nhiệt độ!</span>
+          </div>
+        </div>
+      </div>
+
+      <!-- Controls Mode 1 -->
+      <div id="controls-mode-1" class="space-y-2 hidden">
+        <p class="text-[11px] text-slate-300 leading-relaxed">
+          Góc liên kết cộng hóa trị có cực giữa Oxygen và Hydrogen là <strong>104.5°</strong>.
+        </p>
+        <div class="space-y-1.5 pt-1">
+          <label class="flex items-center justify-between p-2 rounded-xl bg-slate-900/60 hover:bg-slate-900 cursor-pointer border border-slate-800 text-xs">
+            <span class="text-slate-200 flex items-center gap-2">
+              <i class="fa-solid fa-bolt text-amber-400"></i> Điện tích từng phần (δ⁻/δ⁺)
+            </span>
+            <input type="checkbox" id="toggle-charges" checked onchange="toggleChargesVisibility(this.checked)" class="w-4 h-4 accent-cyan-500">
+          </label>
+          <label class="flex items-center justify-between p-2 rounded-xl bg-slate-900/60 hover:bg-slate-900 cursor-pointer border border-slate-800 text-xs">
+            <span class="text-slate-200 flex items-center gap-2">
+              <i class="fa-solid fa-ruler-combined text-cyan-400"></i> Thước đo góc 104.5°
+            </span>
+            <input type="checkbox" id="toggle-angle" checked onchange="toggleAngleVisibility(this.checked)" class="w-4 h-4 accent-cyan-500">
+          </label>
+          <label class="flex items-center justify-between p-2 rounded-xl bg-slate-900/60 hover:bg-slate-900 cursor-pointer border border-slate-800 text-xs">
+            <span class="text-slate-200 flex items-center gap-2">
+              <i class="fa-solid fa-cloud text-blue-400"></i> Đám mây mật độ electron
+            </span>
+            <input type="checkbox" id="toggle-cloud" checked onchange="toggleCloudVisibility(this.checked)" class="w-4 h-4 accent-cyan-500">
+          </label>
+        </div>
+      </div>
+
+      <!-- Controls Mode 2 (Hydrogen Network matching user reference image) -->
+      <div id="controls-mode-2" class="space-y-2.5">
+        <div class="flex items-center justify-between">
+          <span class="text-xs text-slate-300">Nhiệt độ môi trường:</span>
+          <span id="temp-display" class="font-mono-code text-xs font-bold text-cyan-300 bg-cyan-950 px-2 py-0.5 rounded border border-cyan-800">25°C (Nước lỏng)</span>
+        </div>
+        <input type="range" id="temp-slider" min="-15" max="100" value="25" step="1" oninput="updateTemperature(this.value)" class="w-full">
+        <div class="flex justify-between text-[10px] text-slate-400 font-mono-code px-1">
+          <span class="text-blue-400">&lt;0°C (Băng)</span>
+          <span class="text-emerald-400">25°C (Lỏng)</span>
+          <span class="text-rose-400">100°C (Hơi)</span>
+        </div>
+
+        <div id="water-state-badge" class="p-2.5 rounded-xl bg-blue-950/40 border border-blue-800/40 text-[11px]">
+          <div id="state-title" class="font-bold text-cyan-300 flex items-center gap-1.5">
+            <i class="fa-solid fa-circle-nodes"></i> Nước lỏng (25°C) - Cụm phân tử
+          </div>
+          <div id="state-desc" class="text-[10.5px] text-slate-300 mt-1 leading-relaxed">
+            Mô phỏng cụm 32 phân tử nước liên kết qua mạng lưới vạch nét đứt hydrogen ($O \cdots H$) chuẩn hóa theo ảnh thực tế.
+          </div>
+        </div>
+
+        <!-- Visual Style Selector -->
+        <div class="p-2 rounded-xl bg-slate-900/60 border border-slate-800 space-y-1.5">
+          <span class="text-[11px] text-slate-300 font-medium">Kiểu hiển thị LK Hydrogen:</span>
+          <div class="grid grid-cols-2 gap-1.5">
+            <button onclick="setHbondStyle('realistic')" id="hbond-style-real" class="sci-btn active py-1 px-2 rounded-lg text-[10.5px] text-slate-200">
+              <i class="fa-solid fa-image text-cyan-400"></i> Chuẩn ảnh mẫu
+            </button>
+            <button onclick="setHbondStyle('neon')" id="hbond-style-neon" class="sci-btn py-1 px-2 rounded-lg text-[10.5px] text-slate-200">
+              <i class="fa-solid fa-wand-magic-sparkles text-amber-400"></i> Neon phát sáng
+            </button>
+          </div>
+        </div>
+
+        <!-- Stat Counter -->
+        <div class="grid grid-cols-2 gap-2 text-center text-xs">
+          <div class="p-2 rounded-xl bg-slate-900/80 border border-slate-800">
+            <div class="text-[10px] text-slate-400 uppercase font-mono-code">Số LK Hydrogen</div>
+            <div id="hbond-count-val" class="font-bold font-mono-code text-cyan-400 text-sm mt-0.5">48 liên kết</div>
+          </div>
+          <div class="p-2 rounded-xl bg-slate-900/80 border border-slate-800">
+            <div class="text-[10px] text-slate-400 uppercase font-mono-code">Trạng thái xoay</div>
+            <div id="autorotate-status-badge" class="font-bold font-mono-code text-rose-400 text-sm mt-0.5">Đã dừng</div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Controls Mode 3 -->
+      <div id="controls-mode-3" class="space-y-2.5 hidden">
+        <p class="text-[11px] text-slate-300">
+          Cơ chế tạo màng hydrat hóa bao bọc và bẻ gãy liên kết tinh thể muối:
+        </p>
+        <div class="flex gap-2">
+          <button id="dissolve-btn" onclick="startDissolution()" class="flex-1 py-1.5 px-3 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white font-medium text-xs flex items-center justify-center gap-1.5 shadow-lg shadow-emerald-700/30">
+            <i class="fa-solid fa-play"></i> Bắt đầu hòa tan
+          </button>
+          <button onclick="resetNaClCrystal()" class="py-1.5 px-3 rounded-xl sci-btn text-xs text-slate-300">
+            <i class="fa-solid fa-arrow-rotate-left"></i>
+          </button>
+        </div>
+        <div id="dissolve-status" class="text-center font-mono-code text-[11px] text-teal-400">
+          Trạng thái: Tinh thể rắn NaCl nguyên vẹn
+        </div>
+      </div>
+
+    </div>
+
+    <!-- Quick Tooltip & Guaranteed Rotation Stop Button -->
+    <div class="sci-panel p-2 rounded-xl pointer-events-auto text-[11px] text-slate-400 flex items-center justify-between mt-2">
+      <span class="flex items-center gap-1.5 text-slate-300">
+        <i class="fa-regular fa-hand-pointer text-cyan-400"></i> Cử chỉ tay hoặc kéo chuột
+      </span>
+      <button onclick="toggleAutoRotate()" id="autorotate-btn" class="text-[11px] px-2.5 py-1 rounded-lg font-semibold bg-rose-950 text-rose-300 hover:bg-rose-900 border border-rose-800 transition">
+        <i class="fa-solid fa-pause mr-1"></i> Tự quay: Tắt
+      </button>
+    </div>
+  </aside>
+
+  <aside id="right-panel" class="absolute right-4 top-28 z-30 w-80 max-w-[calc(100vw-2rem)] sci-panel rounded-2xl p-3.5 shadow-2xl pointer-events-auto transition-all duration-300">
+    <div class="flex items-center justify-between border-b border-cyan-500/20 pb-2">
+      <div class="flex items-center gap-2">
+        <i class="fa-solid fa-graduation-cap text-cyan-400 text-sm"></i>
+        <h2 class="font-bold text-xs uppercase tracking-wider text-slate-200">Trọng tâm Sinh học 10</h2>
+      </div>
+      <button onclick="toggleKnowledgePanel()" class="text-slate-400 hover:text-white text-xs">
+        <i id="collapse-icon" class="fa-solid fa-chevron-up"></i>
+      </button>
+    </div>
+    <div id="knowledge-content" class="mt-2.5 text-xs leading-relaxed space-y-2 max-h-[50vh] overflow-y-auto pr-1">
+      <!-- Injected via JavaScript -->
+    </div>
+  </aside>
+
+  <!-- AR PIP Card -->
+  <div id="ar-pip-card" class="absolute bottom-5 right-5 z-30 sci-panel rounded-2xl p-2 border border-cyan-500/40 shadow-2xl transition-all duration-300 w-60 md:w-64">
+    <div class="flex items-center justify-between pb-1.5 px-1 border-b border-slate-800 text-[11px]">
+      <span class="flex items-center gap-1.5 text-cyan-400 font-mono-code font-semibold">
+        <i class="fa-solid fa-satellite-dish animate-pulse"></i> HUD TRACKING
+      </span>
+      <button onclick="togglePipMinimization()" class="text-slate-400 hover:text-white px-1 text-xs">
+        <i id="pip-min-icon" class="fa-solid fa-minus"></i>
+      </button>
+    </div>
+    
+    <div id="pip-viewport" class="relative mt-1.5 rounded-xl overflow-hidden bg-black/90 aspect-[4/3] border border-cyan-500/20">
+      <video id="ar-pip-video" playsinline autoplay muted class="w-full h-full object-cover transform -scale-x-100 opacity-70"></video>
+      <canvas id="hand-pip-canvas" class="absolute inset-0 w-full h-full z-10 pointer-events-none transform -scale-x-100"></canvas>
+      <div id="ar-pip-hint" class="absolute inset-0 flex flex-col items-center justify-center text-center p-3 bg-slate-950/80">
+        <i class="fa-solid fa-hand-sparkles text-xl text-cyan-400 mb-1"></i>
+        <p class="text-[11px] text-slate-200 font-medium">Camera AR Sẵn Sàng</p>
+        <p class="text-[9px] text-slate-400 mt-0.5">Bấm "Bật Camera AR" để bắt đầu nhận diện</p>
+      </div>
+    </div>
+  </div>
+
+  <!-- Toast Notification Box -->
+  <div id="toast" class="absolute bottom-6 left-1/2 -translate-x-1/2 z-40 px-4 py-2 rounded-xl sci-panel text-xs text-white border border-cyan-500/40 opacity-0 pointer-events-none transition-all duration-300 shadow-2xl flex items-center gap-2">
+    <i class="fa-solid fa-info-circle text-cyan-400"></i>
+    <span id="toast-text">Thông báo</span>
+  </div>
+
+  <script>
+    /* =========================================================================
+       THÔNG SỐ VẬT THỂ & AR CONFIGURATION (PHIÊN BẢN V3.0 PRO)
+       ========================================================================= */
+    const AR_CONFIG = {
+      // Giới hạn kích thước thu phóng (Bắt buộc không vượt quá 200%)
+      scaleLimits: {
+        min: 0.55,  // 55% kích thước gốc
+        max: 2.0    // 200% kích thước gốc (Khóa an toàn tránh che người thuyết trình)
+      },
+      // Độ nhạy xoay theo cử chỉ tay (Pitch & Yaw)
+      sensitivity: {
+        pitch: 5.5,
+        yaw: 7.8
+      },
+      // Hệ số nội suy mượt mà (Smoothing factor lerp)
+      smoothLerp: 0.12,
+      // Tốc độ tự quay chậm khi bật autorotate
+      idleSpeed: 0.005,
+      // Màu sắc PBR chân thực mô phỏng ảnh mẫu
+      colors: {
+        oxygen: 0xdc2626,       // Đỏ bóng Oxygen chuẩn ảnh
+        hydrogen: 0xf8fafc,     // Trắng ngà Hydrogen
+        covalentBond: 0x94a3b8,  // Cầu nối cộng hóa trị giữa O và H
+        hBondReal: 0xe2e8f0,    // Vạch nét đứt màu sáng xám bạc chuẩn ảnh mẫu
+        hBondNeon: 0x00f3ff,    // Vạch nét đứt neon cyan phát sáng
+        sodium: 0xa855f7,       // Tím Cation Na+
+        chlorine: 0x10b981,     // Xanh lục Anion Cl-
+        hudNeonCyan: '#00f3ff',
+        hudNeonGreen: '#00ff88'
+      }
+    };
+
+    let scene, camera, renderer, controls;
+    let currentMode = 2; // Khởi tạo trực tiếp vào Chế độ 2 (LK Hydrogen chuẩn ảnh mẫu)
+    let autoRotate = false; // Mặc định TẮT tự quay để người dùng tự do quan sát và kiểm soát
+    let isLectureMode = false;
+    let isArPassthrough = false;
+    let hBondStyle = 'realistic'; // 'realistic' hoặc 'neon'
+
+    // Master Three.js Groups
+    const masterRootGroup = new THREE.Group();
+    const mode1Group = new THREE.Group();
+    const mode2Group = new THREE.Group();
+    const mode3Group = new THREE.Group();
+
+    // Mode 1 Meshes & Sprites
+    let oxygenMesh, hydrogenMesh1, hydrogenMesh2;
+    let angleArcGroup, chargeSpritesGroup, cloudGroup;
+
+    // Mode 2 Objects (Cụm phân tử nước chân thực theo ảnh mẫu)
+    let waterCluster = []; // Mảng chứa 32 phân tử nước
+    let hBondsMeshesGroup = new THREE.Group();
+    let currentTemperature = 25;
+    let hBondCount = 0;
+
+    // Mode 3 Objects (NaCl Dung môi)
+    let naClGroup = new THREE.Group();
+    let solventMolecules = [];
+    let ions = [];
+    let isDissolved = false;
+    let dissolutionProgress = 0;
+
+    // MediaPipe & AR State
+    let isArActive = false;
+    let handsDetector = null;
+    let cameraStream = null;
+    let rawVideoEl = null;
+    let fullscreenVideoEl = null;
+    let pipVideoEl = null;
+    let handPipCanvas, handPipCtx;
+    let handFsCanvas, handFsCtx;
+
+    // AR Gesture Smoothing Variables
+    let targetRotationX = 0;
+    let targetRotationY = 0;
+    let targetScale = 1.0;
+    let currentScale = 1.0;
+    let prevSingleHandPos = null;
+    let prevTwoHandDist = null;
+    let activeHandCount = 0;
+
+    // Performance FPS Counter
+    let lastTime = performance.now();
+    let frameCount = 0;
+    let currentFps = 60;
+
+    function initThree() {
+      const container = document.getElementById('canvas-container');
+      const width = window.innerWidth;
+      const height = window.innerHeight;
+
+      // 1. Scene & Camera Setup
+      scene = new THREE.Scene();
+      scene.background = null; // Cho phép hiển thị nền webcam xuyên thấu khi bật AR Passthrough
+
+      camera = new THREE.PerspectiveCamera(45, width / height, 0.1, 1000);
+      camera.position.set(0, 2.5, 14.5);
+
+      // 2. High-Performance PBR Renderer
+      renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true, powerPreference: "high-performance" });
+      renderer.setSize(width, height);
+      renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+      renderer.toneMapping = THREE.ACESFilmicToneMapping;
+      renderer.toneMappingExposure = 1.35;
+      renderer.outputEncoding = THREE.sRGBEncoding;
+      container.appendChild(renderer.domElement);
+
+      // 3. OrbitControls (Mouse & Touch)
+      controls = new THREE.OrbitControls(camera, renderer.domElement);
+      controls.enableDamping = true;
+      controls.dampingFactor = 0.08;
+      controls.maxDistance = 32;
+      controls.minDistance = 3.5;
+      controls.autoRotate = false; // Đảm bảo OrbitControls không tự động xoay
+
+      // 4. Studio PBR Lighting Rig (Tái hiện ánh sáng studio như trong ảnh mẫu)
+      const ambientLight = new THREE.AmbientLight(0xffffff, 0.85);
+      scene.add(ambientLight);
+
+      const mainSun = new THREE.DirectionalLight(0xffffff, 1.3);
+      mainSun.position.set(12, 20, 16);
+      scene.add(mainSun);
+
+      const fillLight = new THREE.DirectionalLight(0xe2e8f0, 0.7);
+      fillLight.position.set(-12, -8, -12);
+      scene.add(fillLight);
+
+      const cyanRim = new THREE.PointLight(0x00f3ff, 1.8, 40);
+      cyanRim.position.set(-10, 6, -8);
+      scene.add(cyanRim);
+
+      const bottomRim = new THREE.PointLight(0xffffff, 0.9, 30);
+      bottomRim.position.set(0, -12, 8);
+      scene.add(bottomRim);
+
+      // 5. Structure Hierarchy
+      masterRootGroup.add(mode1Group);
+      masterRootGroup.add(mode2Group);
+      masterRootGroup.add(mode3Group);
+      scene.add(masterRootGroup);
+
+      // Build 3 Simulation Models
+      buildMode1();
+      buildMode2Cluster(); // Xây dựng cụm LK Hydrogen theo ảnh mẫu
+      buildMode3();
+
+      setSimulationMode(2); // Khởi động ngay Chế độ 2 theo ảnh mẫu
+      window.addEventListener('resize', onWindowResize);
+    }
+
+    function makeTextSprite(message, parameters = {}) {
+      const fontface = parameters.fontface || 'Inter, sans-serif';
+      const fontsize = parameters.fontsize || 32;
+      const fontColor = parameters.fontColor || '#ffffff';
+      const bgColor = parameters.bgColor || 'rgba(10, 15, 29, 0.88)';
+      const borderColor = parameters.borderColor || '#00f3ff';
+      const borderThickness = parameters.borderThickness !== undefined ? parameters.borderThickness : 2;
+
+      const canvas = document.createElement('canvas');
+      canvas.width = 256;
+      canvas.height = 128;
+      const ctx = canvas.getContext('2d');
+
+      ctx.font = `bold ${fontsize}px ${fontface}`;
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'middle';
+
+      const roundRect = (c, x, y, w, h, r) => {
+        c.beginPath();
+        c.moveTo(x + r, y);
+        c.lineTo(x + w - r, y);
+        c.quadraticCurveTo(x + w, y, x + w, y + r);
+        c.lineTo(x + w, y + h - r);
+        c.quadraticCurveTo(x + w, y + h, x + w - r, y + h);
+        c.lineTo(x + r, y + h);
+        c.quadraticCurveTo(x, y + h, x, y + h - r);
+        c.lineTo(x, y + r);
+        c.quadraticCurveTo(x, y, x + r, y);
+        c.closePath();
+        c.fill();
+        if (borderThickness > 0) c.stroke();
+      };
+
+      ctx.fillStyle = bgColor;
+      ctx.strokeStyle = borderColor;
+      ctx.lineWidth = borderThickness;
+      roundRect(ctx, 14, 18, 228, 92, 14);
+
+      ctx.fillStyle = fontColor;
+      ctx.fillText(message, 128, 64);
+
+      const texture = new THREE.CanvasTexture(canvas);
+      texture.minFilter = THREE.LinearFilter;
+      const spriteMaterial = new THREE.SpriteMaterial({ map: texture, transparent: true, depthTest: false });
+      const sprite = new THREE.Sprite(spriteMaterial);
+      sprite.scale.set(2.2, 1.1, 1.0);
+      return sprite;
+    }
+
+    function buildMode1() {
+      // Oxygen atom
+      const oxygenGeo = new THREE.SphereGeometry(1.35, 48, 48);
+      const oxygenMat = new THREE.MeshStandardMaterial({
+        color: AR_CONFIG.colors.oxygen,
+        roughness: 0.18,
+        metalness: 0.12,
+        emissive: 0x7f1d1d,
+        emissiveIntensity: 0.2
+      });
+      oxygenMesh = new THREE.Mesh(oxygenGeo, oxygenMat);
+      mode1Group.add(oxygenMesh);
+
+      // Bond Angle: 104.5 degrees
+      const bondAngleRad = (104.5 * Math.PI) / 180;
+      const halfAngle = bondAngleRad / 2;
+      const bondLength = 3.2;
+
+      const h1Pos = new THREE.Vector3(bondLength * Math.sin(halfAngle), -bondLength * Math.cos(halfAngle), 0);
+      const h2Pos = new THREE.Vector3(-bondLength * Math.sin(halfAngle), -bondLength * Math.cos(halfAngle), 0);
+
+      const hydrogenGeo = new THREE.SphereGeometry(0.72, 36, 36);
+      const hydrogenMat = new THREE.MeshStandardMaterial({
+        color: AR_CONFIG.colors.hydrogen,
+        roughness: 0.25,
+        metalness: 0.08,
+        emissive: 0x38bdf8,
+        emissiveIntensity: 0.08
+      });
+
+      hydrogenMesh1 = new THREE.Mesh(hydrogenGeo, hydrogenMat);
+      hydrogenMesh1.position.copy(h1Pos);
+      mode1Group.add(hydrogenMesh1);
+
+      hydrogenMesh2 = new THREE.Mesh(hydrogenGeo, hydrogenMat);
+      hydrogenMesh2.position.copy(h2Pos);
+      mode1Group.add(hydrogenMesh2);
+
+      // Covalent Bond Connectors
+      function createBond(start, end) {
+        const dist = start.distanceTo(end);
+        const cylGeo = new THREE.CylinderGeometry(0.2, 0.2, dist, 24);
+        const cylMat = new THREE.MeshStandardMaterial({ color: AR_CONFIG.colors.covalentBond, roughness: 0.35, metalness: 0.2 });
+        const cyl = new THREE.Mesh(cylGeo, cylMat);
+        cyl.position.copy(new THREE.Vector3().addVectors(start, end).multiplyScalar(0.5));
+        cyl.quaternion.setFromUnitVectors(new THREE.Vector3(0, 1, 0), new THREE.Vector3().subVectors(end, start).normalize());
+        return cyl;
+      }
+      mode1Group.add(createBond(new THREE.Vector3(0, 0, 0), h1Pos));
+      mode1Group.add(createBond(new THREE.Vector3(0, 0, 0), h2Pos));
+
+      // 104.5° Arc
+      angleArcGroup = new THREE.Group();
+      const arcCurve = new THREE.EllipseCurve(0, 0, 1.8, 1.8, -Math.PI / 2 - halfAngle, -Math.PI / 2 + halfAngle, false, 0);
+      const arcGeo = new THREE.BufferGeometry().setFromPoints(arcCurve.getPoints(50));
+      const arcMat = new THREE.LineBasicMaterial({ color: 0x00f3ff, linewidth: 3 });
+      angleArcGroup.add(new THREE.Line(arcGeo, arcMat));
+
+      const angleLabel = makeTextSprite('104.5°', { fontsize: 34, fontColor: '#00f3ff', borderColor: '#0284c7' });
+      angleLabel.position.set(0, -2.1, 0);
+      angleArcGroup.add(angleLabel);
+      mode1Group.add(angleArcGroup);
+
+      // Partial Charges
+      chargeSpritesGroup = new THREE.Group();
+      const oLabel = makeTextSprite('2δ⁻ (O)', { fontsize: 30, fontColor: '#f87171', borderColor: '#dc2626' });
+      oLabel.position.set(0, 2.05, 0);
+      chargeSpritesGroup.add(oLabel);
+
+      const h1Label = makeTextSprite('δ⁺ (H)', { fontsize: 30, fontColor: '#93c5fd', borderColor: '#0284c7' });
+      h1Label.position.set(h1Pos.x + 0.65, h1Pos.y - 0.7, 0);
+      chargeSpritesGroup.add(h1Label);
+
+      const h2Label = makeTextSprite('δ⁺ (H)', { fontsize: 30, fontColor: '#93c5fd', borderColor: '#0284c7' });
+      h2Label.position.set(h2Pos.x - 0.65, h2Pos.y - 0.7, 0);
+      chargeSpritesGroup.add(h2Label);
+      mode1Group.add(chargeSpritesGroup);
+
+      // Electron Cloud Envelope
+      cloudGroup = new THREE.Group();
+      const cloudGeo = new THREE.SphereGeometry(2.35, 32, 32);
+      const cloudMat = new THREE.MeshStandardMaterial({
+        color: 0xef4444,
+        transparent: true,
+        opacity: 0.16,
+        roughness: 0.8,
+        blending: THREE.AdditiveBlending
+      });
+      const cloudMesh = new THREE.Mesh(cloudGeo, cloudMat);
+      cloudMesh.position.set(0, 0.4, 0);
+      cloudMesh.scale.set(1.1, 1.25, 1.0);
+      cloudGroup.add(cloudMesh);
+      mode1Group.add(cloudGroup);
+    }
+
+    function createAccurateMoleculeInstance(scale = 1.0) {
+      const group = new THREE.Group();
+      const bondAngleRad = (104.5 * Math.PI) / 180;
+      const halfAngle = bondAngleRad / 2;
+      const bondDist = 0.95 * scale;
+
+      // Oxygen: Bóng đỏ chuẩn ảnh
+      const oRadius = 0.45 * scale;
+      const oGeo = new THREE.SphereGeometry(oRadius, 24, 24);
+      const oMat = new THREE.MeshStandardMaterial({
+        color: AR_CONFIG.colors.oxygen,
+        roughness: 0.18,
+        metalness: 0.1,
+        emissive: 0x7f1d1d,
+        emissiveIntensity: 0.15
+      });
+      const oxygen = new THREE.Mesh(oGeo, oMat);
+      group.add(oxygen);
+
+      // Hydrogen: Trắng ngà chuẩn ảnh
+      const hRadius = 0.25 * scale;
+      const hGeo = new THREE.SphereGeometry(hRadius, 20, 20);
+      const hMat = new THREE.MeshStandardMaterial({
+        color: AR_CONFIG.colors.hydrogen,
+        roughness: 0.22,
+        metalness: 0.05
+      });
+
+      const h1Local = new THREE.Vector3(bondDist * Math.sin(halfAngle), -bondDist * Math.cos(halfAngle), 0);
+      const h2Local = new THREE.Vector3(-bondDist * Math.sin(halfAngle), -bondDist * Math.cos(halfAngle), 0);
+
+      const h1 = new THREE.Mesh(hGeo, hMat);
+      h1.position.copy(h1Local);
+      group.add(h1);
+
+      const h2 = new THREE.Mesh(hGeo, hMat);
+      h2.position.copy(h2Local);
+      group.add(h2);
+
+      // Thanh nối cộng hóa trị giữa O và H (màu xám bạc như ảnh)
+      const cRadius = 0.075 * scale;
+      const cGeo = new THREE.CylinderGeometry(cRadius, cRadius, bondDist, 12);
+      const cMat = new THREE.MeshStandardMaterial({ color: AR_CONFIG.colors.covalentBond, roughness: 0.3, metalness: 0.1 });
+
+      const c1 = new THREE.Mesh(cGeo, cMat);
+      c1.position.copy(h1Local).multiplyScalar(0.5);
+      c1.quaternion.setFromUnitVectors(new THREE.Vector3(0, 1, 0), h1Local.clone().normalize());
+      group.add(c1);
+
+      const c2 = new THREE.Mesh(cGeo, cMat);
+      c2.position.copy(h2Local).multiplyScalar(0.5);
+      c2.quaternion.setFromUnitVectors(new THREE.Vector3(0, 1, 0), h2Local.clone().normalize());
+      group.add(c2);
+
+      return {
+        root: group,
+        oxygen: oxygen,
+        h1: h1,
+        h2: h2,
+        h1Local: h1Local,
+        h2Local: h2Local,
+        basePos: new THREE.Vector3(),
+        jitterOffset: new THREE.Vector3(),
+        phase: Math.random() * Math.PI * 2,
+        freq: 1.5 + Math.random() * 2.0
+      };
+    }
+
+    function buildMode2Cluster() {
+      // Xóa các mesh cũ nếu có
+      while (mode2Group.children.length > 0) {
+        mode2Group.remove(mode2Group.children[0]);
+      }
+      waterCluster = [];
+      hBondsMeshesGroup = new THREE.Group();
+      mode2Group.add(hBondsMeshesGroup);
+
+      // Tọa độ 32 phân tử nước tạo thành cụm mạng lưới lục giác & ngũ giác đan xen y hệt ảnh tham khảo
+      const clusterPositions = [
+        new THREE.Vector3(0, 0, 0),
+        new THREE.Vector3(1.9, 0.4, 0.2),
+        new THREE.Vector3(-1.8, -0.3, 0.1),
+        new THREE.Vector3(0.3, 1.8, -0.2),
+        new THREE.Vector3(-0.4, -1.9, 0.3),
+        new THREE.Vector3(1.2, 1.6, 1.4),
+        new THREE.Vector3(-1.4, 1.5, 1.2),
+        new THREE.Vector3(1.5, -1.5, 1.3),
+        new THREE.Vector3(-1.6, -1.4, 1.1),
+        new THREE.Vector3(0.2, 0.2, 2.1),
+        new THREE.Vector3(2.3, 1.9, 0.1),
+        new THREE.Vector3(-2.4, 1.8, -0.2),
+        new THREE.Vector3(2.5, -1.6, -0.3),
+        new THREE.Vector3(-2.2, -1.7, -0.4),
+        new THREE.Vector3(0.5, 2.6, 1.7),
+        new THREE.Vector3(-0.8, -2.7, 1.6),
+        new THREE.Vector3(2.8, 0.2, 1.8),
+        new THREE.Vector3(-2.9, 0.1, 1.7),
+        new THREE.Vector3(0.1, 0.3, -2.0),
+        new THREE.Vector3(1.6, 1.4, -1.5),
+        new THREE.Vector3(-1.5, 1.6, -1.4),
+        new THREE.Vector3(1.7, -1.5, -1.6),
+        new THREE.Vector3(-1.7, -1.3, -1.5),
+        new THREE.Vector3(3.2, 1.2, -0.8),
+        new THREE.Vector3(-3.1, 1.4, -0.7),
+        new THREE.Vector3(3.0, -1.1, -1.0),
+        new THREE.Vector3(-3.2, -1.2, -0.9),
+        new THREE.Vector3(0.8, 3.1, -0.5),
+        new THREE.Vector3(-0.7, -3.2, -0.6),
+        new THREE.Vector3(1.1, -0.3, 3.2),
+        new THREE.Vector3(-1.2, 0.4, 3.1),
+        new THREE.Vector3(0.0, 3.4, 0.8)
+      ];
+
+      for (let i = 0; i < clusterPositions.length; i++) {
+        const mol = createAccurateMoleculeInstance(1.0);
+        mol.basePos.copy(clusterPositions[i]);
+        mol.root.position.copy(clusterPositions[i]);
+
+        // Định hướng tự nhiên để các liên kết H hướng về phía nguyên tử lân cận
+        const lookTarget = clusterPositions[(i + 1) % clusterPositions.length];
+        mol.root.lookAt(lookTarget);
+        mol.root.rotateZ((i * 1.1) % (Math.PI * 2));
+
+        waterCluster.push(mol);
+        mode2Group.add(mol.root);
+      }
+
+      // Xây dựng các đường nét đứt LK Hydrogen 3D ban đầu
+      updateMode2HBondVisuals();
+    }
+
+    // Hàm tạo 1 đường nét đứt 3D (3 đoạn cylinder nhỏ ngắt quãng) nối từ Hydrogen sang Oxygen
+    function createDashed3DBondMesh(p1, p2, color) {
+      const group = new THREE.Group();
+      const distance = p1.distanceTo(p2);
+      if (distance < 0.2 || distance > 3.6) return group;
+
+      const numDashes = 4; // 4 vạch nét đứt ngắt quãng y hệt ảnh mẫu
+      const dashLength = (distance / (numDashes * 2 - 1));
+      const dir = new THREE.Vector3().subVectors(p2, p1).normalize();
+      const radius = 0.045; // Độ dày thanh nét đứt
+
+      const dashMat = new THREE.MeshStandardMaterial({
+        color: color,
+        roughness: 0.35,
+        metalness: 0.1,
+        emissive: color === AR_CONFIG.colors.hBondNeon ? 0x00f3ff : 0x475569,
+        emissiveIntensity: color === AR_CONFIG.colors.hBondNeon ? 0.6 : 0.1
+      });
+
+      const cylGeo = new THREE.CylinderGeometry(radius, radius, dashLength, 8);
+
+      for (let i = 0; i < numDashes; i++) {
+        const segDist = i * 2 * dashLength + (dashLength / 2);
+        const centerPos = new THREE.Vector3().copy(p1).addScaledVector(dir, segDist);
+
+        const dashMesh = new THREE.Mesh(cylGeo, dashMat);
+        dashMesh.position.copy(centerPos);
+        dashMesh.quaternion.setFromUnitVectors(new THREE.Vector3(0, 1, 0), dir);
+        group.add(dashMesh);
+      }
+
+      return group;
+    }
+
+    function updateMode2HBondVisuals() {
+      // Dọn sạch các thanh nét đứt cũ
+      while (hBondsMeshesGroup.children.length > 0) {
+        hBondsMeshesGroup.remove(hBondsMeshesGroup.children[0]);
+      }
+
+      const activeColor = (hBondStyle === 'realistic') ? AR_CONFIG.colors.hBondReal : AR_CONFIG.colors.hBondNeon;
+      hBondCount = 0;
+
+      // Nhiệt độ càng cao thì ngưỡng khoảng cách tạo liên kết càng hẹp (nhiệt độ làm đứt liên kết)
+      let maxBondDist = 2.45;
+      if (currentTemperature <= 0) {
+        maxBondDist = 2.85; // Nước đá: LK Hydrogen bền vững và vươn dài
+      } else if (currentTemperature >= 80) {
+        maxBondDist = 1.6;  // Hơi nước: Bị bẻ gãy gần hết
+      } else {
+        maxBondDist = 2.45; // Nước lỏng (25°C)
+      }
+
+      const oWorldPositions = [];
+      const hWorldPositions = [];
+
+      for (let i = 0; i < waterCluster.length; i++) {
+        const mol = waterCluster[i];
+        const oPos = new THREE.Vector3();
+        mol.oxygen.getWorldPosition(oPos);
+        oWorldPositions.push({ pos: oPos, molIndex: i });
+
+        const h1Pos = new THREE.Vector3();
+        const h2Pos = new THREE.Vector3();
+        mol.h1.getWorldPosition(h1Pos);
+        mol.h2.getWorldPosition(h2Pos);
+        hWorldPositions.push({ pos: h1Pos, molIndex: i });
+        hWorldPositions.push({ pos: h2Pos, molIndex: i });
+      }
+
+      // Quét tìm các cặp H (của phân tử A) gần O (của phân tử B) để vẽ vạch nét đứt
+      for (let h = 0; h < hWorldPositions.length; h++) {
+        const hInfo = hWorldPositions[h];
+        let closestO = null;
+        let minDist = maxBondDist;
+
+        for (let o = 0; o < oWorldPositions.length; o++) {
+          const oInfo = oWorldPositions[o];
+          if (hInfo.molIndex === oInfo.molIndex) continue; // Không tự liên kết trong cùng 1 phân tử
+
+          const dist = hInfo.pos.distanceTo(oInfo.pos);
+          if (dist < minDist) {
+            minDist = dist;
+            closestO = oInfo.pos;
+          }
+        }
+
+        if (closestO) {
+          const bondMesh = createDashed3DBondMesh(hInfo.pos, closestO, activeColor);
+          hBondsMeshesGroup.add(bondMesh);
+          hBondCount++;
+        }
+      }
+
+      // Cập nhật số liệu hiển thị trên HUD
+      const countEl = document.getElementById('hbond-count-val');
+      if (countEl) countEl.textContent = `${hBondCount} liên kết`;
+    }
+
+    function buildMode3() {
+      const latticeSize = 2;
+      const spacing = 1.95;
+      const halfOffset = ((latticeSize - 1) * spacing) / 2;
+
+      for (let x = 0; x < latticeSize; x++) {
+        for (let y = 0; y < latticeSize; y++) {
+          for (let z = 0; z < latticeSize; z++) {
+            const isNa = (x + y + z) % 2 === 0;
+            const radius = isNa ? 0.56 : 0.88;
+            const color = isNa ? AR_CONFIG.colors.sodium : AR_CONFIG.colors.chlorine;
+
+            const ionMesh = new THREE.Mesh(
+              new THREE.SphereGeometry(radius, 24, 24),
+              new THREE.MeshStandardMaterial({
+                color: color,
+                roughness: 0.2,
+                metalness: 0.15,
+                emissive: isNa ? 0x581c87 : 0x064e3b,
+                emissiveIntensity: 0.25
+              })
+            );
+            const initialPos = new THREE.Vector3(x * spacing - halfOffset, y * spacing - halfOffset, z * spacing - halfOffset);
+            ionMesh.position.copy(initialPos);
+
+            ions.push({
+              mesh: ionMesh,
+              isNa: isNa,
+              initialPos: initialPos,
+              dispersedPos: initialPos.clone().multiplyScalar(4.2),
+              currentPos: initialPos.clone()
+            });
+            naClGroup.add(ionMesh);
+          }
+        }
+      }
+      mode3Group.add(naClGroup);
+
+      const numSolventMols = 32;
+      for (let i = 0; i < numSolventMols; i++) {
+        const mol = createAccurateMoleculeInstance(0.75);
+        const angle = (i / numSolventMols) * Math.PI * 2;
+        const radius = 5.2 + Math.random() * 2.2;
+        const yOffset = (Math.random() - 0.5) * 4.2;
+
+        mol.initialOrbitPos = new THREE.Vector3(Math.cos(angle) * radius, yOffset, Math.sin(angle) * radius);
+        mol.root.position.copy(mol.initialOrbitPos);
+        mol.assignedIonIndex = i % ions.length;
+
+        solventMolecules.push(mol);
+        mode3Group.add(mol.root);
+      }
+    }
+
+    // Cập nhật chuyển động dao động nhiệt phân tử mà KHÔNG LÀM XOAY TOÀN CỤM MÔ HÌNH
+    function updateMode2ThermalDynamics(time) {
+      if (currentMode !== 2) return;
+
+      // Biên độ rung rinh nhiệt cục bộ (Brownian Jitter)
+      let jitterAmp = 0.08;
+      if (currentTemperature <= 0) {
+        jitterAmp = 0.01; // Nước đá: Tinh thể gần như đóng băng cứng
+      } else if (currentTemperature >= 80) {
+        jitterAmp = 0.35; // Hơi nước: Dao động nhiệt hỗn loạn
+      } else {
+        jitterAmp = 0.09; // Nước lỏng 25°C: Rung rinh linh động nhẹ nhàng quanh nút mạng
+      }
+
+      for (let i = 0; i < waterCluster.length; i++) {
+        const mol = waterCluster[i];
+        
+        // Dao động điều hòa cục bộ quanh vị trí cơ sở (basePos) - Tuyệt đối không làm cả cụm quay vòng
+        const offsetX = Math.sin(time * mol.freq + mol.phase) * jitterAmp;
+        const offsetY = Math.cos(time * (mol.freq * 0.9) + mol.phase) * jitterAmp;
+        const offsetZ = Math.sin(time * (mol.freq * 1.1) + mol.phase) * jitterAmp;
+
+        mol.root.position.set(
+          mol.basePos.x + offsetX,
+          mol.basePos.y + offsetY,
+          mol.basePos.z + offsetZ
+        );
+
+        // Lắc nhẹ góc phân tử
+        mol.root.rotation.x = Math.sin(time * 0.8 + mol.phase) * (jitterAmp * 0.5);
+        mol.root.rotation.z = Math.cos(time * 0.7 + mol.phase) * (jitterAmp * 0.5);
+      }
+
+      // Cập nhật lại các thanh nét đứt theo chuyển động dao động mới
+      // Để tối ưu hiệu năng, cập nhật vạch nối 3 khung hình 1 lần
+      if (frameCount % 3 === 0) {
+        updateMode2HBondVisuals();
+      }
+    }
+
+    function updateMode3Solvation() {
+      if (currentMode !== 3) return;
+
+      const targetLerp = isDissolved ? 1 : 0;
+      dissolutionProgress += (targetLerp - dissolutionProgress) * 0.035;
+
+      ions.forEach((ion) => {
+        ion.currentPos.lerpVectors(ion.initialPos, ion.dispersedPos, dissolutionProgress);
+        ion.mesh.position.copy(ion.currentPos);
+      });
+
+      solventMolecules.forEach((mol, idx) => {
+        const assignedIon = ions[mol.assignedIonIndex];
+        const ionPos = assignedIon.currentPos;
+
+        if (dissolutionProgress > 0.05) {
+          const shellDistance = assignedIon.isNa ? 1.45 : 1.75;
+          const theta = (idx * 1.6) + (Date.now() * 0.001);
+          const phi = (idx * 0.9);
+
+          const targetWaterPos = new THREE.Vector3(
+            ionPos.x + shellDistance * Math.cos(theta),
+            ionPos.y + (shellDistance * 0.6) * Math.sin(phi),
+            ionPos.z + shellDistance * Math.sin(theta)
+          );
+          mol.root.position.lerp(targetWaterPos, 0.05);
+
+          // Định hướng điện tích: O(δ-) hướng Na+, H(δ+) hướng Cl-
+          if (assignedIon.isNa) {
+            mol.root.lookAt(ionPos);
+          } else {
+            const awayVec = new THREE.Vector3().subVectors(mol.root.position, ionPos).add(mol.root.position);
+            mol.root.lookAt(awayVec);
+          }
+        } else {
+          mol.root.position.lerp(mol.initialOrbitPos, 0.04);
+          mol.root.rotation.y += 0.01;
+        }
+      });
+    }
+
+    async function initMediaPipeHands() {
+      rawVideoEl = document.getElementById('webcam-raw');
+      fullscreenVideoEl = document.getElementById('webcam-fullscreen');
+      pipVideoEl = document.getElementById('ar-pip-video');
+
+      handPipCanvas = document.getElementById('hand-pip-canvas');
+      handPipCtx = handPipCanvas.getContext('2d');
+      handPipCanvas.width = 320;
+      handPipCanvas.height = 240;
+
+      handFsCanvas = document.getElementById('ar-fullscreen-canvas');
+      handFsCtx = handFsCanvas.getContext('2d');
+      handFsCanvas.width = window.innerWidth;
+      handFsCanvas.height = window.innerHeight;
+
+      handsDetector = new Hands({
+        locateFile: (file) => `https://cdn.jsdelivr.net/npm/@mediapipe/hands/${file}`
+      });
+
+      handsDetector.setOptions({
+        maxNumHands: 2,
+        modelComplexity: 1,
+        minDetectionConfidence: 0.55,
+        minTrackingConfidence: 0.55
+      });
+
+      handsDetector.onResults(onHandTrackingResults);
+
+      try {
+        cameraStream = await navigator.mediaDevices.getUserMedia({
+          video: { width: 1280, height: 720, facingMode: "user" }
+        });
+
+        rawVideoEl.srcObject = cameraStream;
+        fullscreenVideoEl.srcObject = cameraStream;
+        pipVideoEl.srcObject = cameraStream;
+
+        await rawVideoEl.play();
+        await fullscreenVideoEl.play();
+        await pipVideoEl.play();
+
+        const cameraFeed = new Camera(rawVideoEl, {
+          onFrame: async () => {
+            if (isArActive) {
+              await handsDetector.send({ image: rawVideoEl });
+            }
+          },
+          width: 640,
+          height: 480
+        });
+        cameraFeed.start();
+
+        isArActive = true;
+        updateArHUD(true);
+        document.getElementById('ar-pip-hint').classList.add('hidden');
+        showToast("AR Finger Tracking kích hoạt! Giơ tay trước camera.");
+      } catch (err) {
+        console.error("Camera error:", err);
+        showToast("Không thể mở Camera. Vui lòng cấp quyền trong trình duyệt!");
+        updateArHUD(false);
+      }
+    }
+
+    const HAND_BONES = [
+      [0, 1], [1, 2], [2, 3], [3, 4],       // Thumb
+      [0, 5], [5, 6], [6, 7], [7, 8],       // Index
+      [0, 9], [9, 10], [10, 11], [11, 12],  // Middle
+      [0, 13], [13, 14], [14, 15], [15, 16],// Ring
+      [0, 17], [17, 18], [18, 19], [19, 20],// Pinky
+      [5, 9], [9, 13], [13, 17]              // Palm base
+    ];
+
+    function renderSkeletonOnContext(ctx, width, height, landmarksList) {
+      ctx.clearRect(0, 0, width, height);
+      if (!landmarksList || landmarksList.length === 0) return;
+
+      landmarksList.forEach((landmarks) => {
+        ctx.save();
+        ctx.lineWidth = 2.4;
+        ctx.strokeStyle = AR_CONFIG.colors.hudNeonCyan;
+        ctx.shadowColor = AR_CONFIG.colors.hudNeonCyan;
+        ctx.shadowBlur = 10;
+        ctx.lineCap = 'round';
+
+        HAND_BONES.forEach(([a, b]) => {
+          const p1 = landmarks[a];
+          const p2 = landmarks[b];
+          ctx.beginPath();
+          ctx.moveTo(p1.x * width, p1.y * height);
+          ctx.lineTo(p2.x * width, p2.y * height);
+          ctx.stroke();
+        });
+        ctx.restore();
+
+        landmarks.forEach((lm, idx) => {
+          const x = lm.x * width;
+          const y = lm.y * height;
+          const isFingertip = [4, 8, 12, 16, 20].includes(idx);
+
+          ctx.save();
+          ctx.beginPath();
+          if (isFingertip) {
+            ctx.arc(x, y, 6, 0, 2 * Math.PI);
+            ctx.fillStyle = AR_CONFIG.colors.hudNeonGreen;
+            ctx.shadowColor = AR_CONFIG.colors.hudNeonGreen;
+            ctx.shadowBlur = 14;
+            ctx.fill();
+            ctx.lineWidth = 1.5;
+            ctx.strokeStyle = '#ffffff';
+            ctx.stroke();
+          } else {
+            ctx.arc(x, y, 3, 0, 2 * Math.PI);
+            ctx.fillStyle = AR_CONFIG.colors.hudNeonCyan;
+            ctx.shadowColor = AR_CONFIG.colors.hudNeonCyan;
+            ctx.shadowBlur = 8;
+            ctx.fill();
+          }
+          ctx.restore();
+        });
+      });
+
+      if (landmarksList.length >= 2) {
+        const p1 = landmarksList[0][8];
+        const p2 = landmarksList[1][8];
+        ctx.save();
+        ctx.lineWidth = 2;
+        ctx.strokeStyle = AR_CONFIG.colors.hudNeonGreen;
+        ctx.shadowColor = AR_CONFIG.colors.hudNeonGreen;
+        ctx.shadowBlur = 12;
+        ctx.setLineDash([6, 6]);
+        ctx.beginPath();
+        ctx.moveTo(p1.x * width, p1.y * height);
+        ctx.lineTo(p2.x * width, p2.y * height);
+        ctx.stroke();
+        ctx.restore();
+      }
+    }
+
+    function onHandTrackingResults(results) {
+      const hands = results.multiHandLandmarks;
+
+      renderSkeletonOnContext(handPipCtx, handPipCanvas.width, handPipCanvas.height, hands);
+      if (isArPassthrough) {
+        renderSkeletonOnContext(handFsCtx, handFsCanvas.width, handFsCanvas.height, hands);
+      }
+
+      const dot = document.getElementById('hud-status-dot');
+      const text = document.getElementById('hud-tracking-state');
+
+      if (!hands || hands.length === 0) {
+        activeHandCount = 0;
+        prevSingleHandPos = null;
+        prevTwoHandDist = null;
+        dot.className = "w-2 h-2 rounded-full bg-slate-500";
+        text.textContent = "AR: Chờ bàn tay";
+        text.className = "text-slate-400";
+        return;
+      }
+
+      if (hands.length === 1) {
+        // 1 BÀN TAY: XOAY VẬT THỂ
+        activeHandCount = 1;
+        prevTwoHandDist = null;
+        const hand = hands[0];
+        const palmCenter = hand[9]; // Middle finger MCP
+
+        dot.className = "w-2 h-2 rounded-full bg-cyan-400 animate-pulse";
+        text.textContent = "1 Tay: Xoay 3D (Pitch/Yaw)";
+        text.className = "text-cyan-300 font-semibold";
+
+        if (prevSingleHandPos) {
+          const dx = palmCenter.x - prevSingleHandPos.x;
+          const dy = palmCenter.y - prevSingleHandPos.y;
+
+          targetRotationY += dx * AR_CONFIG.sensitivity.yaw;
+          targetRotationX += dy * AR_CONFIG.sensitivity.pitch;
+          targetRotationX = Math.max(-1.3, Math.min(1.3, targetRotationX));
+        }
+        prevSingleHandPos = { x: palmCenter.x, y: palmCenter.y };
+
+      } else if (hands.length >= 2) {
+        // 2 BÀN TAY: THU PHÓNG KÍCH THƯỚC (55% - 200%)
+        activeHandCount = 2;
+        prevSingleHandPos = null;
+
+        dot.className = "w-2 h-2 rounded-full bg-emerald-400 animate-pulse";
+        text.textContent = "2 Tay: Phóng to / Thu nhỏ";
+        text.className = "text-emerald-300 font-semibold";
+
+        const h1 = hands[0][8];
+        const h2 = hands[1][8];
+        const currentDist = Math.hypot(h1.x - h2.x, h1.y - h2.y);
+
+        if (prevTwoHandDist !== null) {
+          const distDelta = currentDist - prevTwoHandDist;
+          targetScale += distDelta * 2.8;
+          targetScale = Math.max(AR_CONFIG.scaleLimits.min, Math.min(AR_CONFIG.scaleLimits.max, targetScale));
+        }
+        prevTwoHandDist = currentDist;
+      }
+    }
+
+    function animate() {
+      requestAnimationFrame(animate);
+
+      // FPS Measurement
+      frameCount++;
+      const now = performance.now();
+      const elapsedSeconds = now * 0.001;
+
+      if (now - lastTime >= 1000) {
+        currentFps = Math.round((frameCount * 1000) / (now - lastTime));
+        document.getElementById('hud-fps-counter').textContent = currentFps;
+        frameCount = 0;
+        lastTime = now;
+      }
+
+      // XỬ LÝ XOAY VÀ THU PHÓNG (ĐÃ FIX LỖI TỰ XOAY)
+      if (isArActive && activeHandCount > 0) {
+        // Khi người dùng đang tương tác tay: Lerp theo cử chỉ
+        masterRootGroup.rotation.y += (targetRotationY - masterRootGroup.rotation.y) * AR_CONFIG.smoothLerp;
+        masterRootGroup.rotation.x += (targetRotationX - masterRootGroup.rotation.x) * AR_CONFIG.smoothLerp;
+        currentScale += (targetScale - currentScale) * AR_CONFIG.smoothLerp;
+        masterRootGroup.scale.set(currentScale, currentScale, currentScale);
+        document.getElementById('hud-scale-val').textContent = `${Math.round(currentScale * 100)}%`;
+      } else {
+        // KHI KHÔNG TƯƠNG TÁC TAY:
+        if (autoRotate) {
+          // CHỈ KHI BẬT AUTOROTATE THÌ MỚI QUAY
+          masterRootGroup.rotation.y += AR_CONFIG.idleSpeed;
+          targetRotationY = masterRootGroup.rotation.y;
+        } else {
+          // KHI TẮT TỰ QUAY: GIỮ NGUYÊN GÓC ĐỘ TUYỆT ĐỐI, KHÔNG XOAY DÙ Ở BẤT CỨ NHIỆT ĐỘ NÀO!
+          targetRotationY = masterRootGroup.rotation.y;
+          targetRotationX = masterRootGroup.rotation.x;
+        }
+
+        currentScale += (targetScale - currentScale) * 0.08;
+        masterRootGroup.scale.set(currentScale, currentScale, currentScale);
+        document.getElementById('hud-scale-val').textContent = `${Math.round(currentScale * 100)}%`;
+      }
+
+      // CẬP NHẬT DAO ĐỘNG CÁC CHẾ ĐỘ
+      if (currentMode === 1 && oxygenMesh) {
+        mode1Group.rotation.z = Math.sin(elapsedSeconds * 1.5) * 0.03;
+      }
+      if (currentMode === 2) {
+        // Cập nhật dao động nhiệt phân tử mà KHÔNG GÂY XOAY CẢ KHỐI
+        updateMode2ThermalDynamics(elapsedSeconds);
+      }
+      if (currentMode === 3) {
+        updateMode3Solvation();
+      }
+
+      controls.update();
+      renderer.render(scene, camera);
+    }
+
+    function setSimulationMode(mode) {
+      currentMode = mode;
+      mode1Group.visible = (mode === 1);
+      mode2Group.visible = (mode === 2);
+      mode3Group.visible = (mode === 3);
+
+      document.getElementById('controls-mode-1').classList.toggle('hidden', mode !== 1);
+      document.getElementById('controls-mode-2').classList.toggle('hidden', mode !== 2);
+      document.getElementById('controls-mode-3').classList.toggle('hidden', mode !== 3);
+
+      for (let i = 1; i <= 3; i++) {
+        const btn = document.getElementById(`mode-btn-${i}`);
+        if (btn) btn.classList.toggle('active', i === mode);
+      }
+
+      const titles = [
+        "Chế độ 1: Cấu tạo phân tử H₂O",
+        "Chế độ 2: Mạng LK Hydrogen (Ảnh mẫu)",
+        "Chế độ 3: Dung môi hòa tan (NaCl)"
+      ];
+      document.getElementById('panel-mode-title').textContent = titles[mode - 1];
+
+      updatePedagogicalContent(mode);
+      resetCameraForMode(mode);
+    }
+
+    function resetCameraForMode(mode) {
+      if (mode === 1) camera.position.set(0, 1.5, 9.5);
+      else if (mode === 2) camera.position.set(0, 2.5, 14.5);
+      else if (mode === 3) camera.position.set(0, 4, 16);
+
+      controls.target.set(0, 0, 0);
+      targetRotationX = 0;
+      targetRotationY = 0;
+      masterRootGroup.rotation.set(0, 0, 0);
+    }
+
+    function updateTemperature(val) {
+      currentTemperature = parseFloat(val);
+      const display = document.getElementById('temp-display');
+      const badgeTitle = document.getElementById('state-title');
+      const badgeDesc = document.getElementById('state-desc');
+
+      if (currentTemperature <= 0) {
+        display.textContent = `${currentTemperature}°C (Nước đá)`;
+        display.className = "font-mono-code text-xs font-bold text-blue-300 bg-blue-950 px-2 py-0.5 rounded border border-blue-800";
+        badgeTitle.innerHTML = `<i class="fa-solid fa-snowflake text-blue-400"></i> Nước đá / Thể rắn (≤ 0°C)`;
+        badgeTitle.className = "font-bold text-blue-300 flex items-center gap-1.5";
+        badgeDesc.textContent = "Mạng tinh thể giãn nở rộng cố định; thể tích tăng khiến khối lượng riêng giảm, do đó nước đá nhẹ hơn nước lỏng và nổi lên.";
+      } else if (currentTemperature >= 80) {
+        display.textContent = `${currentTemperature}°C (Hơi nước)`;
+        display.className = "font-mono-code text-xs font-bold text-rose-300 bg-rose-950 px-2 py-0.5 rounded border border-rose-800";
+        badgeTitle.innerHTML = `<i class="fa-solid fa-fire text-rose-400"></i> Hơi nước / Thể khí (≥ 80°C)`;
+        badgeTitle.className = "font-bold text-rose-300 flex items-center gap-1.5";
+        badgeDesc.textContent = "Nhiệt độ cao cung cấp động năng lớn bẻ gãy hầu hết các liên kết Hydrogen; các phân tử chuyển động hỗn loạn ra xa nhau.";
+      } else {
+        display.textContent = `${currentTemperature}°C (Nước lỏng)`;
+        display.className = "font-mono-code text-xs font-bold text-cyan-300 bg-cyan-950 px-2 py-0.5 rounded border border-cyan-800";
+        badgeTitle.innerHTML = `<i class="fa-solid fa-circle-nodes text-cyan-400"></i> Nước lỏng (25°C) - Cụm phân tử`;
+        badgeTitle.className = "font-bold text-cyan-300 flex items-center gap-1.5";
+        badgeDesc.textContent = "Mô phỏng cụm 32 phân tử nước liên kết qua mạng lưới vạch nét đứt hydrogen ($O \\cdots H$) chuẩn hóa theo ảnh thực tế.";
+      }
+
+      // Cập nhật lại hình ảnh liên kết
+      updateMode2HBondVisuals();
+    }
+
+    function setHbondStyle(style) {
+      hBondStyle = style;
+      document.getElementById('hbond-style-real').classList.toggle('active', style === 'realistic');
+      document.getElementById('hbond-style-neon').classList.toggle('active', style === 'neon');
+      updateMode2HBondVisuals();
+      showToast(style === 'realistic' ? "Đã chuyển sang kiểu hiển thị: Chuẩn ảnh mẫu" : "Đã chuyển sang kiểu hiển thị: Neon phát sáng");
+    }
+
+    function startDissolution() {
+      isDissolved = true;
+      document.getElementById('dissolve-status').textContent = "Trạng thái: Đang tạo màng hydrat hóa bao bọc Na⁺ & Cl⁻";
+      document.getElementById('dissolve-status').className = "text-center font-mono-code text-[11px] text-emerald-400";
+      showToast("Phân tử H₂O định hướng điện tích kéo tách các ion NaCl.");
+    }
+
+    function resetNaClCrystal() {
+      isDissolved = false;
+      document.getElementById('dissolve-status').textContent = "Trạng thái: Tinh thể rắn NaCl nguyên vẹn";
+      document.getElementById('dissolve-status').className = "text-center font-mono-code text-[11px] text-teal-400";
+      showToast("Đã khôi phục mạng tinh thể NaCl.");
+    }
+
+    function toggleChargesVisibility(v) { if (chargeSpritesGroup) chargeSpritesGroup.visible = v; }
+    function toggleAngleVisibility(v) { if (angleArcGroup) angleArcGroup.visible = v; }
+    function toggleCloudVisibility(v) { if (cloudGroup) cloudGroup.visible = v; }
+
+    // HÀM BẬT/TẮT TỰ QUAY CHUẨN XÁC
+    function toggleAutoRotate() {
+      autoRotate = !autoRotate;
+      controls.autoRotate = autoRotate;
+      
+      const btn = document.getElementById('autorotate-btn');
+      const badge = document.getElementById('autorotate-status-badge');
+      const hudState = document.getElementById('hud-autorotate-state');
+
+      if (autoRotate) {
+        btn.innerHTML = `<i class="fa-solid fa-play mr-1"></i> Tự quay: Bật`;
+        btn.className = "text-[11px] px-2.5 py-1 rounded-lg font-semibold bg-emerald-950 text-emerald-300 hover:bg-emerald-900 border border-emerald-800 transition";
+        if (badge) {
+          badge.textContent = "Đang quay";
+          badge.className = "font-bold font-mono-code text-emerald-400 text-sm mt-0.5";
+        }
+        if (hudState) {
+          hudState.textContent = "BẬT";
+          hudState.className = "text-emerald-400 font-bold";
+        }
+        showToast("Đã bật chế độ tự xoay chậm.");
+      } else {
+        btn.innerHTML = `<i class="fa-solid fa-pause mr-1"></i> Tự quay: Tắt`;
+        btn.className = "text-[11px] px-2.5 py-1 rounded-lg font-semibold bg-rose-950 text-rose-300 hover:bg-rose-900 border border-rose-800 transition";
+        if (badge) {
+          badge.textContent = "Đã dừng";
+          badge.className = "font-bold font-mono-code text-rose-400 text-sm mt-0.5";
+        }
+        if (hudState) {
+          hudState.textContent = "TẮT";
+          hudState.className = "text-rose-400 font-bold";
+        }
+        // Khóa góc quay hiện tại
+        targetRotationY = masterRootGroup.rotation.y;
+        targetRotationX = masterRootGroup.rotation.x;
+        showToast("Đã tắt tự quay: Mô hình đứng yên cố định ở mọi mức nhiệt độ!");
+      }
+    }
+
+    function resetCameraView() {
+      resetCameraForMode(currentMode);
+      targetScale = 1.0;
+      currentScale = 1.0;
+      masterRootGroup.scale.set(1, 1, 1);
+      showToast("Đã đặt lại góc nhìn và tỉ lệ về 100%.");
+    }
+
+    function toggleLectureMode() {
+      isLectureMode = !isLectureMode;
+      const left = document.getElementById('left-panel');
+      const right = document.getElementById('right-panel');
+      const pip = document.getElementById('ar-pip-card');
+      const btn = document.getElementById('lecture-toggle-btn');
+
+      if (isLectureMode) {
+        left.classList.add('-translate-x-96', 'opacity-0');
+        right.classList.add('translate-x-96', 'opacity-0');
+        pip.classList.add('translate-y-96', 'opacity-0');
+        btn.innerHTML = `<i class="fa-solid fa-compress text-cyan-400"></i>`;
+        showToast("Chế độ Thuyết trình: Mở rộng không gian trình chiếu tivi");
+      } else {
+        left.classList.remove('-translate-x-96', 'opacity-0');
+        right.classList.remove('translate-x-96', 'opacity-0');
+        pip.classList.remove('translate-y-96', 'opacity-0');
+        btn.innerHTML = `<i class="fa-solid fa-expand"></i>`;
+      }
+    }
+
+    function toggleKnowledgePanel() {
+      const content = document.getElementById('knowledge-content');
+      const icon = document.getElementById('collapse-icon');
+      if (content.classList.contains('hidden')) {
+        content.classList.remove('hidden');
+        icon.className = 'fa-solid fa-chevron-up';
+      } else {
+        content.classList.add('hidden');
+        icon.className = 'fa-solid fa-chevron-down';
+      }
+    }
+
+    function togglePipMinimization() {
+      const vp = document.getElementById('pip-viewport');
+      const icon = document.getElementById('pip-min-icon');
+      if (vp.classList.contains('hidden')) {
+        vp.classList.remove('hidden');
+        icon.className = 'fa-solid fa-minus';
+      } else {
+        vp.classList.add('hidden');
+        icon.className = 'fa-solid fa-plus';
+      }
+    }
+
+    async function toggleWebcamAR() {
+      const label = document.getElementById('ar-btn-label');
+      if (!isArActive) {
+        label.textContent = "Khởi tạo...";
+        await initMediaPipeHands();
+        if (isArActive) {
+          label.textContent = "Tắt Camera AR";
+          document.getElementById('ar-toggle-btn').className = "px-3 py-1.5 rounded-lg bg-rose-600 hover:bg-rose-500 text-white text-xs font-semibold shadow-lg shadow-rose-600/30 flex items-center gap-1.5 transition";
+        }
+      } else {
+        isArActive = false;
+        if (cameraStream) {
+          cameraStream.getTracks().forEach(t => t.stop());
+        }
+        handPipCtx.clearRect(0, 0, handPipCanvas.width, handPipCanvas.height);
+        handFsCtx.clearRect(0, 0, handFsCanvas.width, handFsCanvas.height);
+        document.getElementById('ar-pip-hint').classList.remove('hidden');
+        label.textContent = "Bật Camera AR";
+        document.getElementById('ar-toggle-btn').className = "px-3 py-1.5 rounded-lg bg-cyan-600 hover:bg-cyan-500 text-white text-xs font-semibold shadow-lg shadow-cyan-600/30 flex items-center gap-1.5 transition";
+        updateArHUD(false);
+        showToast("Đã tạm dừng Camera AR.");
+      }
+    }
+
+    function toggleArBackground() {
+      isArPassthrough = !isArPassthrough;
+      const fsVideo = document.getElementById('webcam-fullscreen');
+      const label = document.getElementById('ar-bg-label');
+
+      if (isArPassthrough) {
+        if (!isArActive) toggleWebcamAR();
+        fsVideo.classList.remove('opacity-0');
+        fsVideo.classList.add('opacity-85');
+        label.textContent = "Nền AR: Bật";
+        showToast("Chế độ AR Passthrough: Người thuyết trình đứng cùng mô hình 3D");
+      } else {
+        fsVideo.classList.add('opacity-0');
+        fsVideo.classList.remove('opacity-85');
+        label.textContent = "Nền AR: Tắt";
+        handFsCtx.clearRect(0, 0, handFsCanvas.width, handFsCanvas.height);
+      }
+    }
+
+    function updateArHUD(active) {
+      const dot = document.getElementById('hud-status-dot');
+      const text = document.getElementById('hud-tracking-state');
+      if (active) {
+        dot.className = "w-2 h-2 rounded-full bg-cyan-400 animate-pulse";
+        text.textContent = "AR: Đang quét tay";
+        text.className = "text-cyan-300";
+      } else {
+        dot.className = "w-2 h-2 rounded-full bg-slate-500";
+        text.textContent = "AR: Sẵn sàng";
+        text.className = "text-slate-400";
+      }
+    }
+
+    function showToast(msg) {
+      const toast = document.getElementById('toast');
+      const toastText = document.getElementById('toast-text');
+      toastText.textContent = msg;
+      toast.style.opacity = '1';
+      toast.style.transform = 'translate(-50%, -8px)';
+      setTimeout(() => {
+        toast.style.opacity = '0';
+        toast.style.transform = 'translate(-50%, 0)';
+      }, 3500);
+    }
+
+    function updatePedagogicalContent(mode) {
+      const c = document.getElementById('knowledge-content');
+      if (mode === 1) {
+        c.innerHTML = `
+          <div class="space-y-1.5">
+            <h3 class="font-bold text-cyan-300 text-xs">1. Cấu tạo phân tử nước (H₂O)</h3>
+            <p class="text-slate-300">• Gồm 1 nguyên tử Oxygen liên kết cộng hóa trị có cực với 2 nguyên tử Hydrogen.</p>
+            <p class="text-slate-300">• Độ âm điện O (3.44) lớn hơn H (2.20) nên đôi electron dùng chung bị kéo lệch về O.</p>
+            <div class="p-2 rounded-lg bg-slate-900 border border-slate-800 text-[11px]">
+              <span class="text-cyan-400 font-semibold">Góc liên kết:</span> <strong>104.5°</strong> (hình dạng gấp khúc đặc trưng).
+            </div>
+            <p class="text-slate-300">• <strong>Kết luận:</strong> Đầu O mang điện tích âm (2δ⁻), đầu H mang điện tích dương (δ⁺) &rarr; <span class="text-amber-300 font-semibold">Tính phân cực</span>.</p>
+          </div>
+        `;
+      } else if (mode === 2) {
+        c.innerHTML = `
+          <div class="space-y-1.5">
+            <h3 class="font-bold text-cyan-300 text-xs">2. Mạng lưới liên kết Hydrogen (Chuẩn ảnh mẫu)</h3>
+            <p class="text-slate-300">• Nhờ tính phân cực, nguyên tử O (mang điện tích âm $\\delta^-$) của phân tử này hút nguyên tử H (mang điện tích dương $\\delta^+$) của phân tử lân cận tạo thành <strong>liên kết Hydrogen</strong> (biểu diễn bằng các vạch nét đứt).</p>
+            <div class="p-2 rounded-lg bg-slate-900 border border-slate-800 text-[11px]">
+              <span class="text-cyan-400 font-semibold">Tại sao nước đá nổi trên mặt nước?</span>
+              <p class="text-slate-300 mt-1">Ở nhiệt độ &le; 0°C, các phân tử nước cố định thành mạng lục giác rỗng có khoảng cách lớn &rarr; thể tích tăng &rarr; khối lượng riêng giảm, do đó nước đá nhẹ hơn nước lỏng và nổi lên trên bề mặt.</p>
+            </div>
+            <p class="text-slate-300">• <strong>Ý nghĩa sinh thái:</strong> Lớp băng nổi trên bề mặt hồ đóng vai trò như lớp cách nhiệt, bảo vệ sự sống cho các sinh vật thủy sinh dưới đáy hồ trong mùa đông giá lạnh.</p>
+          </div>
+        `;
+      } else if (mode === 3) {
+        c.innerHTML = `
+          <div class="space-y-1.5">
+            <h3 class="font-bold text-cyan-300 text-xs">3. Dung môi vạn năng hòa tan muối</h3>
+            <p class="text-slate-300">• Nước hòa tan các chất phân cực nhờ lực hút tĩnh điện hình thành màng hydrat hóa.</p>
+            <div class="p-2 rounded-lg bg-slate-900 border border-slate-800 text-[11px]">
+              <span class="text-cyan-400 font-semibold">Cơ chế:</span>
+              <ul class="list-disc pl-4 mt-1 space-y-0.5 text-slate-300">
+                <li>O(2δ⁻) hướng vào cation <strong>Na⁺</strong></li>
+                <li>H(δ⁺) hướng vào anion <strong>Cl⁻</strong></li>
+              </ul>
+            </div>
+            <p class="text-slate-300">• <strong>Vai trò tế bào:</strong> Nước là môi trường diễn ra mọi phản ứng sinh hóa và phương tiện vận chuyển các chất.</p>
+          </div>
+        `;
+      }
+    }
+
+    function onWindowResize() {
+      camera.aspect = window.innerWidth / window.innerHeight;
+      camera.updateProjectionMatrix();
+      renderer.setSize(window.innerWidth, window.innerHeight);
+
+      if (handFsCanvas) {
+        handFsCanvas.width = window.innerWidth;
+        handFsCanvas.height = window.innerHeight;
+      }
+    }
+
+    window.onload = function () {
+      initThree();
+      animate();
+      showToast("Web AR V3.0 PRO sẵn sàng! Mạng LK Hydrogen đã chuẩn hóa theo ảnh mẫu.");
+    };
+  </script>
+</body>
+</html>
